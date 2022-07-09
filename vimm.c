@@ -220,6 +220,26 @@ void displayEditBuffer(char *text)
   //mvprintw(0,0,"%s", text);
 }
 
+void printInView(char* message){
+  int numLine = 0;
+  int right=0;
+
+  while(numLine < currentBottom && right < (int)strlen(message)){
+    if(numLine > currentTop){
+      mvprintw(numLine, 4+right, "%c", message[right]);
+      right++;
+    }else if(message[right] == '\n'){
+      mvprintw(numLine, 4+right, "\n");
+      numLine++;
+      right+=1;
+    }
+    else{
+      numLine++;
+    }
+  }
+}
+
+
 void adjustViewRangePrint(int currentTop, int currentBottom)
 {
   int ind=0;
@@ -382,13 +402,17 @@ void normalMode(struct statusBar statusbar, int maxLine, int endOfLine)
 }
 
 void insertion(int x, int y, char c){
-  for(int i=dst[count-1][(int)strlen(dst[count-1])]; i> x;i--){
-    if(dst[y][i+1] == '\0'){
+  int X = x-4;
+  int len = (int)strlen(dst[y]);
 
-    }
-    dst[y][i+1] = dst[y][i];
-  }
-  dst[y][x-4] = c;
+  char *new = (char*)malloc(sizeof(char) * (int)strlen(dst[y]) + 1);;
+  char *right = (char*)malloc(sizeof(char) * (len - X));
+  char *left = (char*)malloc(sizeof(char) * X);
+  for(int i=0; i<X; i++) left[i] = dst[y][i];
+  for(int i=X; i<len; i++) right[i-X] = dst[y][i];
+  sprintf(new, "%s%c%s",left,c,right);
+  dst[y] = (char*)malloc(sizeof(char) * (int)strlen(dst[y]) + 1);
+  dst[y] = new;
 }
 
 
@@ -659,6 +683,7 @@ int main(int argc, char *argv[])
       else if(actualY < currentTop) {currentTop--; currentBottom--;}
 
       if(count > LINES-2){
+        //printInView(message);
         adjustViewRangePrint(currentTop, currentBottom);
       }else{justPrint();}
 
@@ -697,6 +722,7 @@ int main(int argc, char *argv[])
   free_form(my_form);
   free_field(field[0]);
   free_field(field[1]);
+  free(dst);
 
   return 0;
 }
