@@ -9,26 +9,34 @@
 
 #include <stdbool.h>
 
-enum
+enum Cmd
   {
     WRITE,
     QUIT,
     BANG,
     SED,
-    GREP
+    GREP,
+    SAVE
   };
 
+extern enum Cmd cmd;
 
 typedef struct{
   int id;
 }cmdParser;
 
 
+bool intutiveCmp(char* formar ,char* latter)
+{
+  return !strcmp(formar, latter);
+}
 
 int cmdParse(char* cmd, bool saved_flag){
   int result = 0;
-  if(strcmp(cmd,"q")){
+  if(intutiveCmp(cmd, "q")){
     result = QUIT;
+  }else if(intutiveCmp(cmd, "w")){
+    result = SAVE;
   }
   return result;
 }

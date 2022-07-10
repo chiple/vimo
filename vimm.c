@@ -5,15 +5,17 @@
 #include "./cmdParser.h"
 #include <sys/ioctl.h>
 
-
 #define size 600000
 #define limit_line 1000
+
+enum Cmd cmd;
 
 enum
   {
     ENTER = 10,
     ESC = 27,
-    CAPITAL_G = 71
+    CAPITAL_G = 71,
+    BACKSPACE = 127,
   };
 
 enum
@@ -26,10 +28,30 @@ enum
 
 typedef struct
 {
+  /*guestimates*/
+  char* key;
+  void* value;
+  void (*castType)();
+}Pair;
+
+typedef struct
+{
   int x;
   int y;
-
 }Point;
+
+Point casePoint(void* value)
+{
+  Point* pointe = (Point*)value;
+  return *pointe;
+}
+
+Point caseBlank(void* value)
+{
+  Point* blank= (Point*)value;
+  return *blank;
+}
+
 
 typedef struct
 {
@@ -41,7 +63,6 @@ char *dst[size];
 char *bufe[size];
 int count = 0;
 int mode = NORMAL;
-int *modePtr = &mode;
 int x = 1;
 int y = 1;
 int actualX = 1;
@@ -51,8 +72,10 @@ int ch;
 FIELD *field[3];
 FORM *my_form;
 
-int spacePlace[size];
-Point spacePlace2[size];
+Point spacePlace[size];
+/*just holding the y of \n */
+int blankPlace[size];
+
 bool saved = false;
 
 
@@ -70,19 +93,29 @@ typedef struct
   //WINDOW* child;
 }mainWindow;
 
-void saveBuffer(FILE *out)
+void commandMessage(char* message)
 {
-  printf("save data anyhow!");
+  mvprintw(LINES-1,4,"%s", message);
 }
+
+void saveFile();
 
 void readCommand(char* cmd, bool save_flag)
 {
   printw("%d",cmdParse(cmd, save_flag));
   switch(cmdParse(cmd, save_flag)){
-  case 0:
+  case QUIT:
     endwin();
     exit(2);
+    break;
+  case SAVE:
+    commandMessage("Saved!");
+    saveFile();
+    break;
+  default:
+    commandMessage("Not defined");
   }
+
 }
 
 void adjustStatusContents()
@@ -192,7 +225,7 @@ DisplayedText initDisplayedText(char* text)
   while(text[i] != '\0'){
     if(text[i] == ' '){
       Point tmp = {tmpX,tmpY};
-      spacePlace2[j] = tmp;
+      spacePlace[j] = tmp;
       j++;
     }else{;;}
     if(text[i] == '\n'){
@@ -215,49 +248,16 @@ void moveToNextSpace()
 }
 
 
-void displayEditBuffer(char *text)
-{
-  //mvprintw(0,0,"%s", text);
-}
-
-void printInView(char* message){
-  int numLine = 0;
-  int right=0;
-
-  while(numLine < currentBottom && right < (int)strlen(message)){
-    if(numLine > currentTop){
-      mvprintw(numLine, 4+right, "%c", message[right]);
-      right++;
-    }else if(message[right] == '\n'){
-      mvprintw(numLine, 4+right, "\n");
-      numLine++;
-      right+=1;
-    }
-    else{
-      numLine++;
-    }
-  }
-}
-
-
 void adjustViewRangePrint(int currentTop, int currentBottom)
 {
   int ind=0;
-  for(int i=currentTop; i< currentBottom; i++){
+  for(int i=currentTop; i< currentBottom-1; i++){
     mvprintw(ind, 4,"%s", dst[i]);
     ind++;
   }
 }
 
-void deleteChar()
-{
 
-}
-
-void movePerWords()
-{
-
-}
 
 enum
   {
@@ -299,11 +299,24 @@ bool endOfLine()
 }
 
 
-void insertBlankLine(int x, int y)
+void insertBlankLine(int x, int y, int pos)
 {
   /*shifting the position of current line*/
+  for(int i=count-1; i >  y;i--){
+    dst[i+1] = (char*)malloc(sizeof(char) * (int)strlen(dst[i]));
+    dst[i+1]=dst[i];
+  }
+  dst[y+pos] = "\n";
+  count++;
+}
 
-
+void deleteLine(int x, int y)
+{
+  for(int i=y; i < count-1; i++){
+    dst[i] = (char*)malloc(sizeof(char) * (int)strlen(dst[i+1]));
+    dst[i]=dst[i+1];
+  }
+  count--;
 }
 
 void setMarkedPoints(int **markedpoints, int x, int y)
@@ -315,6 +328,67 @@ void setMarkedPoints(int **markedpoints, int x, int y)
     markedpoints[1][0] = x;
     markedpoints[1][1] = y;
   }
+}
+
+
+void insertion(int x, int y, char c){
+  int X = x-4;
+  int len = (int)strlen(dst[y]);
+
+  if(c != '\0'){
+    char *new = (char*)malloc(sizeof(char) * (int)strlen(dst[y]) + 1);;
+    char *right = (char*)malloc(sizeof(char) * (len - X));
+    char *left = (char*)malloc(sizeof(char) * X);
+    for(int i=0; i<X; i++) left[i] = dst[y][i];
+    for(int i=X; i<len; i++) right[i-X] = dst[y][i];
+
+    sprintf(new, "%s%c%s",left,c,right);
+    dst[y] = (char*)malloc(sizeof(char) * (int)strlen(dst[y]) + 1);
+
+    dst[y] = new;
+  }else if(c=='\0'){
+    char *new = (char*)malloc(sizeof(char) * (int)strlen(dst[y]) - 1);;
+    char *right = (char*)malloc(sizeof(char) * (len - X -1));
+    char *left = (char*)malloc(sizeof(char) * (X-1));
+    for(int i=0; i<X-1; i++) left[i] = dst[y][i];
+    for(int i=X; i<len; i++) right[i-X] = dst[y][i];
+
+    sprintf(new, "%s%s",left,right);
+    dst[y] = (char*)malloc(sizeof(char) * (int)strlen(dst[y]) - 1);
+
+    dst[y] = new;
+  }
+
+}
+
+
+/*time to update is when the content of the file is written */
+void updateSpaces()
+{
+  int indSpace=0;
+  int indBlank=0;
+  for(int i=0; i<count-1; i++){
+    for(int j=0; j<(int)strlen(dst[i]); j++){
+      if(strcmp(dst[i], "\n")){
+        blankPlace[indBlank] = i;
+        indBlank++;
+      }
+      else if(dst[i][j] == ' '){
+        spacePlace[indSpace].x = j;
+        spacePlace[indSpace].y = i;}
+      indSpace++;
+    }
+  }
+}
+
+void middleJump(int x, int y)
+{
+
+}
+
+void movePerWords()
+{
+
 }
 /*set the mode NORMAL as default*/
 /////////////MODE//////////////
@@ -357,7 +431,7 @@ void normalMode(struct statusBar statusbar, int maxLine, int endOfLine)
     /* move top or bottom */
   case CAPITAL_G:
     y += maxLine - y -1;
-    actualY = maxLine+1;
+    actualY = maxLine;
     if(actualY > LINES + 2){
       currentTop = actualY - LINES +2;
       currentBottom = actualY;
@@ -386,9 +460,30 @@ void normalMode(struct statusBar statusbar, int maxLine, int endOfLine)
     statusbar.mode= "INSERT";
     mode= INSERT;
     break;
-  case 'o':
-    mode=INSERT;
+  case 'x':
+    insertion(actualX,actualY,'\0');
+    x--;
+    actualX--;
+    break;
+  case 'd':
+    if(getch() == 'd'){
+      deleteLine(actualX, actualY);
+    }
+    break;
 
+  case 'a':
+    x++;
+    actualX++;
+    statusbar.mode= "INSERT";
+    mode= INSERT;
+    break;
+  case 'o':
+    statusbar.mode= "INSERT";
+    y++;
+    actualY++;
+    insertBlankLine(actualX, actualY, 1);
+    mode=INSERT;
+    break;
     ///////VISUAL////////
   case 'v':
     statusbar.mode= " VISUAL ";
@@ -400,21 +495,6 @@ void normalMode(struct statusBar statusbar, int maxLine, int endOfLine)
     break;
   }
 }
-
-void insertion(int x, int y, char c){
-  int X = x-4;
-  int len = (int)strlen(dst[y]);
-
-  char *new = (char*)malloc(sizeof(char) * (int)strlen(dst[y]) + 1);;
-  char *right = (char*)malloc(sizeof(char) * (len - X));
-  char *left = (char*)malloc(sizeof(char) * X);
-  for(int i=0; i<X; i++) left[i] = dst[y][i];
-  for(int i=X; i<len; i++) right[i-X] = dst[y][i];
-  sprintf(new, "%s%c%s",left,c,right);
-  dst[y] = (char*)malloc(sizeof(char) * (int)strlen(dst[y]) + 1);
-  dst[y] = new;
-}
-
 
 void insertMode(struct statusBar statusbar)
 {
@@ -428,6 +508,16 @@ void insertMode(struct statusBar statusbar)
   case ESC:
     mode = NORMAL;
     break;
+  case ENTER:
+    y++;
+    actualY++;
+    insertBlankLine(actualX, actualY, 0);
+    break;
+  case BACKSPACE:
+    insertion(actualX,actualY,'\0');
+    x--;
+    actualX--;
+    break;
   default:
     insertion(actualX,actualY,c);
     x++;
@@ -435,6 +525,7 @@ void insertMode(struct statusBar statusbar)
     break;
   }
 }
+
 
 void visualMode(struct statusBar statusbar, int points)
 {
@@ -455,6 +546,8 @@ void visualMode(struct statusBar statusbar, int points)
   }
 }
 
+
+
 void hundleCommand(struct statusBar statusbar, char* message, int line)
 {
   field[0] = new_field(1, 40, LINES-1, 1, 0, 0);
@@ -468,7 +561,7 @@ void hundleCommand(struct statusBar statusbar, char* message, int line)
   post_form(my_form);
 
   mvprintw(LINES-4, 2, "%c",dst[y][x-4]);
-  printNaminami(count);
+  printNaminami(count-2);
         for(int i=0; i<count; i++){
           mvprintw(i,4, "%s", dst[i]);
         }
@@ -480,7 +573,6 @@ void hundleCommand(struct statusBar statusbar, char* message, int line)
   while((ch = getch()) != ESC)
     {
       printNaminami(line);
-      displayEditBuffer(message);
         for(int i=0; i<count; i++){
           mvprintw(i,4, "%s", dst[i]);
         }
@@ -508,13 +600,14 @@ void hundleCommand(struct statusBar statusbar, char* message, int line)
   statusbar.mode = "NORMAL";
 }
 
-void saveFile(char* text)
+void saveFile()
 {
-  char path[10] = "./";
-  int i=0;
+  char path[100] = "./testout.txt";
   FILE* fps;
   fps=fopen(path, "w+");
-  fprintf(fps,"%s",text); //save text to file
+  for(int i=0; i<count-1; i++){
+    fprintf(fps,"%s%s", dst[i],"\n"); //save text to file
+  }
   fclose(fps);//close file
   printw("saved!");
 }
@@ -527,7 +620,7 @@ void printDebug()
   mvprintw(LINES-5, 4,"currentTop:%d currentBotoom:%d", currentTop , currentBottom);
   mvprintw(LINES-6, 4,"maxLine::%d", count);
   mvprintw(LINES-7, 4,"Line on cursor::%s", dst[actualY]);
-  mvprintw(LINES-8, 4,"SpacePlace-x::%d -y::%d", spacePlace2[1].x, spacePlace2[1].y);
+  mvprintw(LINES-8, 4,"SpacePlace-x::%d -y::%d", spacePlace[0].x, spacePlace[0].y);
 }
 
 void limitScreen(int max_x, int max_y)
@@ -633,8 +726,6 @@ int main(int argc, char *argv[])
   /////////////INIT//////////////
   initCurses();
 
-
-
   struct statusBar statusbar = initStatusBar(filename);
 
   /*TODO this will be updated so this place is wrong to put.*/
@@ -655,6 +746,11 @@ int main(int argc, char *argv[])
   currentTop = 0;
   currentBottom = LINES-2;
 
+  Pair Spaces[10] ;
+
+  //Spaces[0].key = "unpoi";
+  //Spaces[0].value = (void*){1,2};
+  //Point a = Spaces[0].castType(Spaces[0].value);
   /*count of the lines number contained by the target file*/
   int count;
   count = split(dst, message, '\n');
@@ -673,9 +769,8 @@ int main(int argc, char *argv[])
       /*clear the screen*/
       erase();
 
-      printDebug();
+      //printDebug();
 
-      displayEditBuffer(message);
       /*check the range of view depending on the current cursor.*/
       if(y > LINES-3){y=LINES-3;}else{;}
 
@@ -687,7 +782,7 @@ int main(int argc, char *argv[])
         adjustViewRangePrint(currentTop, currentBottom);
       }else{justPrint();}
 
-      printNaminami(displayed.numOfLine);
+      printNaminami(count);
 
       limitScreen(strlen(dst[actualY]) + 3, displayed.numOfLine-1);
       move(y,x);
